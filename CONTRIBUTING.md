@@ -86,18 +86,16 @@ Maintainers only.
    `oci://ghcr.io/l4r-s/charts/krivy`, and creates the GitHub release with the
    chart `.tgz` attached. Tags with a `-` suffix (e.g. `v0.2.0-rc.1`) become
    pre-releases and do not move `latest`.
-4. **First release only:** GHCR packages are created private. Set both
-   `krivy` and `charts/krivy` to public once, and grant the repository write
-   access to each package. Steps and verification commands are in
-   [docs/installation.md](docs/installation.md#releases-and-package-visibility-maintainers).
-5. Verify the published chart installs from OCI in a scratch cluster:
+4. Verify the published chart installs from OCI in a scratch cluster. To check
+   that the image and chart pull without credentials, see
+   [docs/installation.md](docs/installation.md#releases-maintainers).
    ```sh
    helm show chart oci://ghcr.io/l4r-s/charts/krivy --version X.Y.Z
    helm install krivy oci://ghcr.io/l4r-s/charts/krivy --version X.Y.Z \
      -n krivy-system --create-namespace
    kubectl -n krivy-system rollout status deploy/krivy
    ```
-6. Optional: list the chart on [Artifact Hub](https://artifacthub.io). This
+5. Optional: list the chart on [Artifact Hub](https://artifacthub.io). This
    needs an `artifacthub-repo.yml` pushed to the OCI repository (as the
    `artifacthub.io` tag) and a repository registration on Artifact Hub. Not set
    up yet.

@@ -245,7 +245,7 @@ helm uninstall krivy -n krivy-system
 kubectl -n krivy-system delete pvc krivy-data   # SQLite data, kept by default
 ```
 
-## Releases and package visibility (maintainers)
+## Releases (maintainers)
 
 Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`. That workflow:
 
@@ -256,20 +256,24 @@ Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`. That workflow:
 * creates the GitHub release with generated notes and attaches the chart
   `.tgz`.
 
-New GHCR packages are **private** on first push. `GITHUB_TOKEN` cannot change
-their visibility, and the REST API has no documented endpoint for it. So after
-the first release, set both packages to public once, by hand:
+No manual package setup is needed. The packages are created by this
+repository's workflow, so they are linked to `l4r-s/krivy`, which can keep
+pushing to them, and they are publicly pullable (verified for v0.1.0).
 
-1. https://github.com/users/l4r-s/packages/container/krivy/settings → *Change visibility* → Public
-2. https://github.com/users/l4r-s/packages/container/charts%2Fkrivy/settings → *Change visibility* → Public
-
-Check the result with the GitHub CLI (requires a token with `read:packages`):
+To confirm a release can be pulled without credentials, request an anonymous
+token and fetch each manifest. Both should print `200`:
 
 ```sh
-gh api /users/l4r-s/packages/container/krivy --jq .visibility
-gh api /users/l4r-s/packages/container/charts%2Fkrivy --jq .visibility
+for repo in l4r-s/krivy l4r-s/charts/krivy; do
+  tok=$(curl -s "https://ghcr.io/token?scope=repository:$repo:pull" | jq -r .token)
+  curl -s -o /dev/null -w "$repo: %{http_code}\n" \
+    -H "Authorization: Bearer $tok" \
+    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
+    "https://ghcr.io/v2/$repo/manifests/X.Y.Z"
+done
 ```
 
-In the same settings page, under *Manage Actions access*, give the repository
-`l4r-s/krivy` **write** access to each package. Otherwise later workflow runs
-cannot push to a package that was created manually or by another repository.
+If a package ever shows up private (for example, one first pushed from another
+repository or by hand), change it on its GitHub package settings page under
+*Change visibility*, and grant `l4r-s/krivy` **write** access under *Manage
+Actions access*.
