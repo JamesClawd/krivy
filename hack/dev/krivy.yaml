@@ -1,0 +1,68 @@
+# Krivy configuration for local development against the k3d dev cluster.
+# Used by `make run` and `make dev-run` (see docs/development.md).
+#
+# INSECURE - DEV ONLY: the API tokens below are well-known values whose sha256
+# hashes are committed here. Never use them (or this file) outside the local
+# k3d cluster.
+#   read token:   krivy-dev-read-token-insecure
+#   manage token: krivy-dev-manage-token-insecure
+#
+#   curl -H 'Authorization: Bearer krivy-dev-read-token-insecure' localhost:8080/api/v1/summary
+
+server:
+  address: "127.0.0.1:8080"
+
+database:
+  driver: sqlite
+  # Relative to the repository root (make runs from there). .dev/ is gitignored.
+  dsn: .dev/krivy.db
+
+kubernetes:
+  # Dedicated kubeconfig written by `make dev-cluster`; never ~/.kube/config.
+  # `make dev-run` also sets KRIVY_KUBECONFIG / KRIVY_KUBE_CONTEXT explicitly.
+  kubeconfig: .dev/kubeconfig
+  context: k3d-krivy-dev
+  jobNamespace: krivy-system
+  scannerServiceAccount: krivy-scanner
+  excludeNamespaces:
+    - kube-system
+    - kube-public
+    - kube-node-lease
+
+scan:
+  # "off" disables scheduled scans; scans run only when triggered
+  # (POST /api/v1/scans or MCP). Omit it to get the default @every 12h.
+  schedule: "off"
+  scanOnStartup: false
+  maxConcurrentJobs: 2
+  maxAttempts: 2
+
+trivy:
+  image: ghcr.io/aquasecurity/trivy:0.67.2
+  severities: [CRITICAL]
+  timeout: 10m
+  ttlAfterFinished: 5m
+
+auth:
+  tokens:
+    - name: dev-read
+      # sha256("krivy-dev-read-token-insecure") - INSECURE, DEV ONLY
+      sha256: b7bf3141667e8750d716fcc7dd721b090f54ec1d3f190a5fb8a589483edf5f99
+      scopes: [read]
+    - name: dev-manage
+      # sha256("krivy-dev-manage-token-insecure") - INSECURE, DEV ONLY
+      sha256: 3c6643d8b4b50b1c3fb07bbe26ce7180046b4ff830cb80003dc18a27c3bed6d8
+      scopes: [read, scan, manage]
+
+notifications:
+  baseURL: http://localhost:8080
+  # Allows webhooks to local receivers such as http://localhost:9000/hook.
+  allowPrivateNetworks: true
+  destinations: []
+  # Example local receiver (e.g. `nc -lk 9000` or a request bin):
+  # - name: local
+  #   url: http://127.0.0.1:9000/hook
+  #   events: [new_critical, resolved, scan_failed]
+
+log:
+  level: debug

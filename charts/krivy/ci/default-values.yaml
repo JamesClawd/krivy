@@ -1,0 +1,9 @@
+# Defaults: sqlite + PVC, cluster-wide discovery, one token.
+auth:
+  tokens:
+    - name: ci
+      scopes: [read, scan]
+secret:
+  create: true
+  data:
+    KRIVY_TOKEN_CI: ci-token-0123456789abcdef

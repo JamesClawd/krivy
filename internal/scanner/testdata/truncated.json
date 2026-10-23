@@ -1,0 +1,25 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-10-20T10:00:00.000000000Z",
+  "ArtifactName": "docker.io/library/nginx@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "OS": {"Family": "debian", "Name": "12.5"},
+    "ImageID": "sha256:aaaa",
+    "RepoTags": [],
+    "RepoDigests": ["nginx@sha256:1111111111111111111111111111111111111111111111111111111111111111"]
+  },
+  "Results": [
+    {
+      "Target": "docker.io/library/nginx@sha256:1111 (debian 12.5)",
+      "Class": "os-pkgs",
+      "Type": "debian",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-6387",
+          "PkgID": "openssh-client@1:9.2p1-2+deb12u2",
+          "PkgName": "openssh-client",
+          "InstalledVersion": "1:9.2p1-2+deb12u2",
+          "FixedVersion": "1:9.2p1-2+deb12u3",
+          "Status": "fixed",
+         

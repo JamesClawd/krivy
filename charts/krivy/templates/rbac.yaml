@@ -1,0 +1,94 @@
+{{- $fullname := include "krivy.fullname" . }}
+{{- $sa := include "krivy.serviceAccountName" . }}
+{{- $watchNs := .Values.kubernetes.watchNamespace }}
+# Discovery: read Pods and resolve owners (Pod -> ReplicaSet -> Deployment,
+# Pod -> Job -> CronJob via ownerReferences). Read-only.
+{{- if $watchNs }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-discovery
+  namespace: {{ $watchNs }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-discovery
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+{{- end }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+{{- if $watchNs }}
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-discovery
+  namespace: {{ $watchNs }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-discovery
+{{- else }}
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-discovery
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-discovery
+{{- end }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+# Scanner Jobs: manage Trivy Jobs and read their pods/logs in the job namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-scanner-jobs
+  namespace: {{ include "krivy.jobNamespace" . }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-scanner-jobs
+  namespace: {{ include "krivy.jobNamespace" . }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-scanner-jobs
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}

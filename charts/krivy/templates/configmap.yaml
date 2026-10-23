@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "krivy.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- include "krivy.config" . | nindent 4 }}

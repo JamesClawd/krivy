@@ -1,0 +1,31 @@
+Krivy {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+Scanner Jobs run in namespace {{ include "krivy.jobNamespace" . }} as ServiceAccount {{ include "krivy.scannerServiceAccountName" . }}.
+Database: {{ .Values.database.driver }}{{ if include "krivy.isSqlite" . }} ({{ if include "krivy.usePVC" . }}PVC {{ include "krivy.claimName" . }}{{ else }}emptyDir - data is lost on restart!{{ end }}){{ end }}
+Scan schedule: {{ .Values.scan.schedule | quote }}, max {{ .Values.scan.maxConcurrentJobs }} concurrent Trivy Job(s).
+
+1. Reach the API:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "krivy.fullname" . }} 8080:{{ .Values.service.port }}
+  curl -s http://localhost:8080/healthz
+
+2. Call the REST API with a token (TOKEN = the value of the matching KRIVY_TOKEN_* secret key):
+
+  curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/images
+  curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/scans
+
+3. MCP endpoint: http://localhost:8080/mcp (same bearer token).
+{{- if not .Values.auth.tokens }}
+
+WARNING: auth.tokens is empty - no API token is configured. Add tokens and provide
+KRIVY_TOKEN_<NAME> via existingSecret or secret.data.
+{{- else }}
+
+Configured tokens (env var expected in the Secret):
+{{- range .Values.auth.tokens }}
+  - {{ .name }}: {{ if .sha256 }}sha256 hash{{ else }}{{ include "krivy.tokenEnv" . }}{{ end }}
+{{- end }}
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+
+NetworkPolicy is enabled: scanner pods may only reach DNS and TCP {{ join "," .Values.networkPolicy.scanner.egressPorts }} (Trivy DB + registries).
+{{- end }}

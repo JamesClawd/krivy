@@ -1,0 +1,21 @@
+apiVersion: v2
+name: krivy
+description: Kubernetes CVE-scanning controller that scans running images with ephemeral Trivy Jobs.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/l4r-s/krivy
+sources:
+  - https://github.com/l4r-s/krivy
+keywords:
+  - security
+  - cve
+  - trivy
+  - vulnerability
+  - scanner
+annotations:
+  artifacthub.io/license: MIT
+maintainers:
+  - name: l4r-s
+    url: https://github.com/l4r-s

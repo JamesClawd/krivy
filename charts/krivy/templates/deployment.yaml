@@ -1,0 +1,137 @@
+{{- if and (eq .Values.database.driver "sqlite") (gt (int .Values.replicaCount) 1) }}
+{{- fail "replicaCount > 1 is not supported with the sqlite driver" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "krivy.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 3
+  strategy:
+    {{- if .Values.updateStrategy }}
+    {{- toYaml .Values.updateStrategy | nindent 4 }}
+    {{- else if include "krivy.isSqlite" . }}
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "krivy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include "krivy.config" . | sha256sum }}
+        {{- if and .Values.secret.create (not .Values.existingSecret) }}
+        checksum/secret: {{ toYaml .Values.secret.data | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "krivy.labels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "krivy.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: krivy
+          image: {{ include "krivy.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/krivy/config.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: KRIVY_DATABASE_DRIVER
+              value: {{ .Values.database.driver | quote }}
+            - name: KRIVY_JOB_NAMESPACE
+              value: {{ include "krivy.jobNamespace" . | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- $secret := include "krivy.secretName" . }}
+          {{- if or $secret .Values.extraEnvFrom }}
+          envFrom:
+            {{- if $secret }}
+            - secretRef:
+                name: {{ $secret }}
+            {{- end }}
+            {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/krivy
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if include "krivy.isSqlite" . }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "krivy.fullname" . }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- if include "krivy.isSqlite" . }}
+        - name: data
+          {{- if include "krivy.usePVC" . }}
+          persistentVolumeClaim:
+            claimName: {{ include "krivy.claimName" . }}
+          {{- else }}
+          # persistence disabled: findings are lost when the pod restarts
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

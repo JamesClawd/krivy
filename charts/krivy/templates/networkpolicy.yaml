@@ -1,0 +1,83 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+# Controller: only the configured peers may reach the HTTP API (8080).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "krivy.fullname" . }}-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "krivy.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if $np.controller.restrictEgress }}
+    - Egress
+    {{- end }}
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+      from:
+        {{- if $np.ingressFrom }}
+        {{- toYaml $np.ingressFrom | nindent 8 }}
+        {{- else }}
+        - podSelector: {}
+        {{- end }}
+  {{- if $np.controller.restrictEgress }}
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        {{- range $np.controller.egressPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- with $np.controller.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+---
+# Scanner pods: no ingress; egress only to DNS and registries / Trivy DB
+# (ghcr.io, mirror.gcr.io, your registries) on the configured ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "krivy.fullname" . }}-scanner
+  namespace: {{ include "krivy.jobNamespace" . }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $np.scanner.podSelector | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        {{- range $np.scanner.egressCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range $np.scanner.egressPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- with $np.scanner.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

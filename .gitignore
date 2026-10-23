@@ -1,0 +1,9 @@
+/bin/
+/dist/
+*.db
+*.db-shm
+*.db-wal
+/.dev/
+/coverage.out
+.env
+*.tgz

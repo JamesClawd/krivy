@@ -1,0 +1,33 @@
+# Generic JSON webhook with bearer auth, e.g. for an internal incident system
+# or an automation platform (n8n, Zapier, ...).
+# Env: ALERT_WEBHOOK_TOKEN.
+notifications:
+  baseURL: https://krivy.example.com
+  destinations:
+    - name: generic
+      url: https://hooks.example.com/krivy
+      method: POST
+      headers:
+        Authorization: Bearer ${ALERT_WEBHOOK_TOKEN}
+      events: [new_critical, resolved, scan_failed]
+      timeout: 5s
+      maxRetries: 5
+      template: |
+        {
+          "source": "krivy",
+          "event": {{ json .Event.Type }},
+          "cluster": {{ json .Event.Cluster }},
+          "time": {{ json (formatTime "2006-01-02T15:04:05Z07:00" .Event.Time) }},
+          "scan": {"id": {{ json .Scan.ID }}, "status": {{ json .Scan.Status }}, "error": {{ json .Scan.Error }}},
+          "count": {{ .Count }},
+          "bySeverity": {{ json (countBySeverity .Findings) }},
+          "link": {{ json (printf "%s/api/v1/findings?status=open" .BaseURL) }},
+          "findings": [
+            {{- range $i, $f := .Findings }}{{ if $i }},{{ end }}
+            {"id": {{ json $f.ID }}, "cve": {{ json $f.VulnerabilityID }}, "severity": {{ json $f.Severity }},
+             "package": {{ json $f.PkgName }}, "installed": {{ json $f.InstalledVersion }},
+             "fixed": {{ json $f.FixedVersion }}, "image": {{ json $f.ImageRef }},
+             "workloads": {{ json $f.Workloads }}}
+            {{- end }}
+          ]
+        }

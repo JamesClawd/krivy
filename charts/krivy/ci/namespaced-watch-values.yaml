@@ -1,0 +1,14 @@
+kubernetes:
+  watchNamespace: production
+  jobNamespace: krivy-scans
+scanner:
+  registrySecret: registry-creds
+  imagePullSecrets: [registry-creds]
+  serviceAccount:
+    imagePullSecrets:
+      - name: mirror-creds
+persistence:
+  enabled: false
+scan:
+  schedule: "0 3 * * *"
+  maxConcurrentJobs: 3

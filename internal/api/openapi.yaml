@@ -1,0 +1,651 @@
+openapi: 3.1.0
+info:
+  title: Krivy API
+  version: v1
+  summary: Kubernetes container image CVE scanning controller.
+  description: |
+    REST API for triggering scans, browsing vulnerability findings,
+    acknowledging findings and managing alert silences.
+
+    All endpoints except this document require a static bearer token
+    (`Authorization: Bearer <token>`). Tokens carry scopes:
+    `read` (all GET endpoints), `scan` (trigger/cancel scans; implies read)
+    and `manage` (acknowledgements and silences; implies scan and read).
+    Missing or invalid tokens get 401; insufficient scope gets 403.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: scans
+  - name: findings
+  - name: silences
+  - name: summary
+  - name: meta
+paths:
+  /api/v1/scans:
+    post:
+      tags: [scans]
+      operationId: triggerScan
+      summary: Trigger a scan
+      description: |
+        Queues a cluster-wide or namespace scan and returns immediately.
+        Requires scope `scan`. An empty body triggers a cluster scan.
+        The `Location` header points at the new scan run.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanRequest'
+            examples:
+              cluster:
+                value: {scope: cluster}
+              namespace:
+                value: {scope: namespace, namespace: payments}
+      responses:
+        '202':
+          description: Scan accepted.
+          headers:
+            Location:
+              description: URL of the created scan run.
+              schema: {type: string, example: /api/v1/scans/3f1c2b7e-8a3d-4a52-9f0e-1f6a6f0b8c11}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanRun'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+    get:
+      tags: [scans]
+      operationId: listScans
+      summary: List scan runs (newest first)
+      parameters:
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/ScanStatusValue'}
+        - name: scope
+          in: query
+          schema: {type: string, enum: [cluster, namespace]}
+        - name: namespace
+          in: query
+          schema: {type: string}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of scan runs.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: {$ref: '#/components/schemas/ScanRun'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/scans/{id}:
+    get:
+      tags: [scans]
+      operationId: getScan
+      summary: Get a scan run with its per-image jobs
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: Scan status.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScanStatus'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/scans/{id}/cancel:
+    post:
+      tags: [scans]
+      operationId: cancelScan
+      summary: Request cancellation of a scan run
+      description: Requires scope `scan`. Cancelling an already-finished run is a no-op that returns the run unchanged.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: Cancellation requested.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScanRun'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/findings:
+    get:
+      tags: [findings]
+      operationId: listFindings
+      summary: List vulnerability findings (newest first)
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [open, resolved]}
+        - name: severity
+          in: query
+          description: Case-insensitive.
+          schema: {$ref: '#/components/schemas/Severity'}
+        - name: namespace
+          in: query
+          description: Only findings in images used by an active workload in this namespace.
+          schema: {type: string}
+        - name: image
+          in: query
+          description: Image key (`<repository>@<digest>` or image reference).
+          schema: {type: string}
+        - name: vulnerability
+          in: query
+          description: Vulnerability ID, e.g. CVE-2024-3094.
+          schema: {type: string}
+        - name: acknowledged
+          in: query
+          schema: {type: boolean}
+        - name: deployed
+          in: query
+          description: Restrict to images that are (true) or are no longer (false) deployed.
+          schema: {type: boolean}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of findings.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: {$ref: '#/components/schemas/Finding'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/findings/{id}:
+    get:
+      tags: [findings]
+      operationId: getFinding
+      summary: Get a finding with its image, workloads and silence state
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: Finding detail.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FindingDetail'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/findings/{id}/acknowledge:
+    post:
+      tags: [findings]
+      operationId: acknowledgeFinding
+      summary: Acknowledge a finding
+      description: Requires scope `manage`. The body is optional.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AckRequest'}
+            example: {reason: 'Not exploitable: the vulnerable code path is unused.'}
+      responses:
+        '200':
+          description: The acknowledged finding.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+    delete:
+      tags: [findings]
+      operationId: unacknowledgeFinding
+      summary: Remove the acknowledgement of a finding
+      description: Requires scope `manage`.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: The finding.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/silences:
+    get:
+      tags: [silences]
+      operationId: listSilences
+      summary: List silences
+      parameters:
+        - name: all
+          in: query
+          description: Include expired and revoked silences (default only active).
+          schema: {type: boolean, default: false}
+      responses:
+        '200':
+          description: Silences.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Silence'}
+                  total: {type: integer}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [silences]
+      operationId: createSilence
+      summary: Create a silence
+      description: |
+        Silences suppress notifications (not visibility) for matching
+        findings. Requires scope `manage`. Bound the silence with either
+        `expiresAt` or `duration`; omit both for no expiry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SilenceRequest'}
+            examples:
+              cve:
+                value: {kind: vulnerability, target: CVE-2024-3094, reason: Accepted risk, duration: 720h}
+              namespace:
+                value: {kind: namespace, target: sandbox, expiresAt: '2026-12-31T00:00:00Z'}
+      responses:
+        '201':
+          description: The created silence.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Silence'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/silences/{id}:
+    delete:
+      tags: [silences]
+      operationId: revokeSilence
+      summary: Revoke a silence
+      description: Requires scope `manage`. Returns the revoked silence.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: The revoked silence.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Silence'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/summary:
+    get:
+      tags: [summary]
+      operationId: getSummary
+      summary: Aggregate security summary
+      responses:
+        '200':
+          description: Summary.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Summary'}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /api/v1/openapi.yaml:
+    get:
+      tags: [meta]
+      operationId: getOpenAPI
+      summary: This OpenAPI document
+      security: []
+      responses:
+        '200':
+          description: OpenAPI 3.1 document.
+          content:
+            application/yaml:
+              schema: {type: string}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Static API token configured in Krivy's token list.
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      description: Page size.
+      schema: {type: integer, minimum: 1, maximum: 500, default: 50}
+    Offset:
+      name: offset
+      in: query
+      schema: {type: integer, minimum: 0, default: 0}
+  responses:
+    BadRequest:
+      description: Invalid parameters or body.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: bad_request, message: limit must be an integer between 1 and 500}}
+    Unauthenticated:
+      description: Missing or invalid bearer token.
+      headers:
+        WWW-Authenticate:
+          schema: {type: string, example: 'Bearer realm="krivy"'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: unauthenticated, message: missing or invalid bearer token}}
+    Forbidden:
+      description: Token lacks the required scope.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: forbidden, message: token lacks the required scope}}
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: not_found, message: resource not found}}
+    Conflict:
+      description: The request conflicts with the resource state.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: conflict, message: 'conflict: scan already finished'}}
+    Internal:
+      description: Unexpected server error (details are logged server-side).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: internal, message: internal server error}}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [bad_request, unauthenticated, forbidden, not_found, method_not_allowed, conflict, internal]
+            message: {type: string}
+    PageMeta:
+      type: object
+      required: [total, limit, offset]
+      properties:
+        total: {type: integer, format: int64, description: Total matching items.}
+        limit: {type: integer}
+        offset: {type: integer}
+    Severity:
+      type: string
+      enum: [CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
+    ScanStatusValue:
+      type: string
+      enum: [pending, running, succeeded, partial, failed, cancelled]
+    ScanRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scope:
+          type: string
+          enum: [cluster, namespace]
+          default: cluster
+        namespace:
+          type: string
+          description: Required when scope is namespace.
+    ScanRun:
+      type: object
+      required: [id, scope, trigger, status, totalImages, completedImages, failedImages, newFindings, resolvedFindings, cancelRequested, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        scope: {type: string, enum: [cluster, namespace]}
+        namespace: {type: string}
+        trigger: {type: string, enum: [schedule, api, mcp, startup]}
+        requestedBy: {type: string, example: 'token:ci'}
+        status: {$ref: '#/components/schemas/ScanStatusValue'}
+        totalImages: {type: integer}
+        completedImages: {type: integer}
+        failedImages: {type: integer}
+        newFindings: {type: integer}
+        resolvedFindings: {type: integer}
+        error: {type: string}
+        cancelRequested: {type: boolean}
+        createdAt: {type: string, format: date-time}
+        startedAt: {type: string, format: date-time}
+        finishedAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+      example:
+        id: 3f1c2b7e-8a3d-4a52-9f0e-1f6a6f0b8c11
+        scope: namespace
+        namespace: payments
+        trigger: api
+        requestedBy: 'token:ci'
+        status: pending
+        totalImages: 0
+        completedImages: 0
+        failedImages: 0
+        newFindings: 0
+        resolvedFindings: 0
+        cancelRequested: false
+        createdAt: '2026-10-23T08:00:00Z'
+        updatedAt: '2026-10-23T08:00:00Z'
+    ScanJob:
+      type: object
+      required: [id, scanRunId, imageKey, imageRef, status, attempts, vulnerabilityCount, createdAt, updatedAt]
+      properties:
+        id: {type: string}
+        scanRunId: {type: string}
+        imageKey: {type: string}
+        imageRef: {type: string}
+        status: {type: string, enum: [pending, running, succeeded, failed, cancelled]}
+        attempts: {type: integer}
+        k8sJobName: {type: string}
+        error: {type: string}
+        diagnostics: {type: string}
+        vulnerabilityCount: {type: integer}
+        startedAt: {type: string, format: date-time}
+        finishedAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    ScanStatus:
+      allOf:
+        - $ref: '#/components/schemas/ScanRun'
+        - type: object
+          properties:
+            jobs:
+              type: array
+              items: {$ref: '#/components/schemas/ScanJob'}
+    Finding:
+      type: object
+      required: [id, imageKey, vulnerabilityId, pkgName, installedVersion, severity, status, firstSeenAt, lastSeenAt, createdAt, updatedAt]
+      properties:
+        id: {type: string, description: Stable hash of image key, vulnerability, package and version.}
+        imageKey: {type: string}
+        vulnerabilityId: {type: string}
+        pkgName: {type: string}
+        pkgPath: {type: string}
+        installedVersion: {type: string}
+        fixedVersion: {type: string}
+        severity: {$ref: '#/components/schemas/Severity'}
+        title: {type: string}
+        primaryUrl: {type: string}
+        status: {type: string, enum: [open, resolved]}
+        firstSeenAt: {type: string, format: date-time}
+        lastSeenAt: {type: string, format: date-time}
+        resolvedAt: {type: string, format: date-time}
+        reopenedAt: {type: string, format: date-time}
+        acknowledgedAt: {type: string, format: date-time}
+        acknowledgedBy: {type: string}
+        acknowledgeReason: {type: string}
+        lastScanRunId: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+      example:
+        id: 9b2f0c4e5a1d
+        imageKey: ghcr.io/acme/api@sha256:4f2a...
+        vulnerabilityId: CVE-2024-3094
+        pkgName: xz-utils
+        installedVersion: 5.6.0-1
+        fixedVersion: 5.6.1-1
+        severity: CRITICAL
+        status: open
+        firstSeenAt: '2026-10-20T08:00:00Z'
+        lastSeenAt: '2026-10-23T08:00:00Z'
+        createdAt: '2026-10-20T08:00:00Z'
+        updatedAt: '2026-10-23T08:00:00Z'
+    Image:
+      type: object
+      required: [key, repository, ref, firstSeenAt, lastSeenAt, deployed]
+      properties:
+        key: {type: string}
+        repository: {type: string}
+        digest: {type: string}
+        ref: {type: string}
+        os: {type: string}
+        firstSeenAt: {type: string, format: date-time}
+        lastSeenAt: {type: string, format: date-time}
+        lastScannedAt: {type: string, format: date-time}
+        deployed: {type: boolean}
+    Workload:
+      type: object
+      required: [imageKey, namespace, kind, name, container, active, firstSeenAt, lastSeenAt]
+      properties:
+        imageKey: {type: string}
+        namespace: {type: string}
+        kind: {type: string, example: Deployment}
+        name: {type: string}
+        container: {type: string}
+        active: {type: boolean}
+        firstSeenAt: {type: string, format: date-time}
+        lastSeenAt: {type: string, format: date-time}
+    FindingDetail:
+      allOf:
+        - $ref: '#/components/schemas/Finding'
+        - type: object
+          required: [workloads, namespaces, silenced]
+          properties:
+            image: {$ref: '#/components/schemas/Image'}
+            workloads:
+              type: array
+              items: {$ref: '#/components/schemas/Workload'}
+            namespaces:
+              type: array
+              items: {type: string}
+            silenced: {type: boolean, description: Whether an active silence currently covers the finding.}
+            silencedBy:
+              type: array
+              items: {type: string}
+              description: IDs of the covering silences.
+    AckRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: {type: string}
+    SilenceRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, target]
+      properties:
+        kind: {type: string, enum: [finding, image, namespace, vulnerability]}
+        target:
+          type: string
+          description: Finding ID, image key, namespace name or vulnerability ID, depending on kind.
+        reason: {type: string}
+        expiresAt: {type: string, format: date-time}
+        duration: {type: string, description: 'Go duration such as 720h.', example: 720h}
+    Silence:
+      type: object
+      required: [id, kind, target, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [finding, image, namespace, vulnerability]}
+        target: {type: string}
+        reason: {type: string}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        revokedAt: {type: string, format: date-time}
+        revokedBy: {type: string}
+      example:
+        id: 0c6f5a3e-2b7d-4f0a-8c1e-5d9b7a6e4f21
+        kind: vulnerability
+        target: CVE-2024-3094
+        reason: Accepted risk
+        createdBy: 'token:admin'
+        createdAt: '2026-10-23T08:00:00Z'
+        expiresAt: '2026-11-22T08:00:00Z'
+    Summary:
+      type: object
+      required: [openFindings, openUnacknowledged, openBySeverity, affectedImages, deployedImages, activeSilences, openByNamespace]
+      properties:
+        openFindings: {type: integer, format: int64}
+        openUnacknowledged: {type: integer, format: int64}
+        openBySeverity:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        affectedImages: {type: integer, format: int64}
+        deployedImages: {type: integer, format: int64}
+        activeSilences: {type: integer, format: int64}
+        openByNamespace:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        lastScan: {$ref: '#/components/schemas/ScanRun'}
+        lastSuccessfulScan: {$ref: '#/components/schemas/ScanRun'}
+      example:
+        openFindings: 42
+        openUnacknowledged: 30
+        openBySeverity: {CRITICAL: 2, HIGH: 10, MEDIUM: 20, LOW: 10}
+        affectedImages: 7
+        deployedImages: 25
+        activeSilences: 1
+        openByNamespace: {payments: 12, default: 30}

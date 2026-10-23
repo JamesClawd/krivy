@@ -1,0 +1,232 @@
+# Default values for krivy.
+
+image:
+  repository: ghcr.io/l4r-s/krivy
+  # -- Defaults to the chart appVersion.
+  tag: ""
+  # -- Optional digest (sha256:...); takes precedence over tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# -- Pull secrets for the controller image.
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Controller ServiceAccount.
+serviceAccount:
+  create: true
+  # -- Defaults to the release fullname.
+  name: ""
+  annotations: {}
+
+# Trivy scanner Jobs.
+scanner:
+  serviceAccount:
+    # -- Create the low-privilege scanner ServiceAccount in the job namespace.
+    create: true
+    name: krivy-scanner
+    annotations: {}
+    # -- Pull secrets attached to the scanner ServiceAccount (pulls the Trivy image itself).
+    imagePullSecrets: []
+  # -- Pull secrets added to every scanner Job pod (kubernetes.imagePullSecrets).
+  imagePullSecrets: []
+  # -- Name of a kubernetes.io/dockerconfigjson Secret in the job namespace that
+  # Trivy uses to pull private images it scans (kubernetes.registrySecret).
+  registrySecret: ""
+
+kubernetes:
+  # -- Namespace for scanner Jobs. Defaults to the release namespace.
+  jobNamespace: ""
+  # -- Restrict discovery to a single namespace (Role instead of ClusterRole). Empty = all namespaces.
+  watchNamespace: ""
+  # -- Namespaces skipped during cluster-wide discovery.
+  excludeNamespaces: []
+
+database:
+  # -- sqlite or postgres.
+  driver: sqlite
+  # -- DSN. Empty: /data/krivy.db for sqlite, "${KRIVY_DATABASE_DSN}" (from the Secret) for postgres.
+  dsn: ""
+
+# SQLite persistence (ignored when database.driver=postgres).
+persistence:
+  enabled: true
+  # -- Use an existing PVC instead of creating one.
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+
+scan:
+  # -- Cron expression or "@every <duration>".
+  schedule: "@every 12h"
+  # -- Simultaneously running scanner Jobs (1-50).
+  maxConcurrentJobs: 1
+  maxAttempts: 2
+  scanOnStartup: true
+
+trivy:
+  # -- Pinned official Trivy image used by scanner Jobs.
+  image: ghcr.io/aquasecurity/trivy:0.67.2
+  severities:
+    - CRITICAL
+  timeout: 15m
+  ttlAfterFinished: 10m
+  maxOutputBytes: 16777216
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+      ephemeralStorage: 512Mi
+    limits:
+      memory: 1Gi
+      ephemeralStorage: 2Gi
+  extraArgs: []
+
+auth:
+  # -- API tokens. Each entry renders `token: "${KRIVY_TOKEN_<NAME>}"` (name upper-cased,
+  # "-" -> "_") unless `env` (custom variable name) or `sha256` is given. The variable
+  # must be provided by the Secret (existingSecret or secret.data) or extraEnv.
+  # Example:
+  #   - name: ci
+  #     scopes: [read, scan]
+  #   - name: admin
+  #     scopes: [read, scan, manage]
+  #   - name: dashboard
+  #     sha256: "<64 hex chars>"
+  #     scopes: [read]
+  tokens: []
+
+notifications:
+  # -- Public URL of Krivy, exposed to webhook templates as .BaseURL.
+  baseURL: ""
+  allowPrivateNetworks: false
+  # -- Webhook destinations, rendered verbatim into the config
+  # (see docs/installation.md). Use ${ENV} references for secrets.
+  destinations: []
+
+log:
+  level: info
+  format: json
+
+server:
+  shutdownTimeout: 15s
+
+# -- Existing Secret whose keys are exposed as environment variables
+# (KRIVY_TOKEN_*, KRIVY_DATABASE_DSN, webhook secrets, ...).
+existingSecret: ""
+
+# Chart-managed Secret (ignored when existingSecret is set).
+secret:
+  create: false
+  # -- Key/value pairs stored as stringData and exposed as environment variables.
+  data: {}
+
+# -- Extra environment variables for the controller container.
+extraEnv: []
+# -- Extra envFrom sources for the controller container.
+extraEnvFrom: []
+
+replicaCount: 1
+
+# -- Deployment strategy. Empty: Recreate for sqlite, RollingUpdate(maxSurge 0) for postgres.
+updateStrategy: {}
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 2
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: krivy.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+networkPolicy:
+  # -- Create NetworkPolicies for the controller and scanner pods.
+  enabled: false
+  # -- Peers allowed to reach the controller on 8080. Empty = pods in the release namespace.
+  ingressFrom: []
+  controller:
+    # -- Also restrict controller egress (DNS, API server, database, webhooks).
+    restrictEgress: false
+    # -- TCP ports the controller may reach when restrictEgress is true
+    # (443/6443 API server + HTTPS webhooks, 5432 postgres).
+    egressPorts: [443, 6443, 5432]
+    # -- Extra egress rules for the controller.
+    extraEgress: []
+  scanner:
+    # -- Labels selecting scanner Job pods.
+    podSelector:
+      app.kubernetes.io/name: krivy
+      app.kubernetes.io/component: scanner
+    # -- TCP ports scanner pods may reach (Trivy DB download + registries).
+    egressPorts: [443, 80]
+    # -- CIDRs scanner pods may reach on egressPorts.
+    egressCIDRs:
+      - 0.0.0.0/0
+      - ::/0
+    # -- Extra egress rules for scanner pods (e.g. an in-cluster registry).
+    extraEgress: []

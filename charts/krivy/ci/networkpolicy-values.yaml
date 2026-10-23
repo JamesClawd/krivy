@@ -1,0 +1,28 @@
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  controller:
+    restrictEgress: true
+  scanner:
+    extraEgress:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: registry
+        ports:
+          - port: 5000
+            protocol: TCP
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: krivy.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: krivy-tls
+      hosts: [krivy.example.com]

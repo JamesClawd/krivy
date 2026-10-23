@@ -1,0 +1,13 @@
+2026-10-20T10:00:00Z	INFO	[vulndb] Need to update DB
+{"level":"info","msg":"structured log line, not a report"}
+2026-10-20T10:00:05Z	INFO	Detected OS	family="alpine" version="3.20.3"
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "ghcr.io/org/app@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "ArtifactType": "container_image",
+  "Metadata": {"OS": {"Family": "alpine", "Name": "3.20.3"}, "RepoDigests": ["ghcr.io/org/app@sha256:2222222222222222222222222222222222222222222222222222222222222222"]},
+  "Results": [
+    {"Target": "ghcr.io/org/app (alpine 3.20.3)", "Class": "os-pkgs", "Type": "alpine"}
+  ]
+}
+2026-10-20T10:00:09Z	WARN	trailing noise after report

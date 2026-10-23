@@ -1,0 +1,30 @@
+database:
+  driver: postgres
+persistence:
+  enabled: true # ignored for postgres
+existingSecret: krivy-secrets
+auth:
+  tokens:
+    - name: reader
+      scopes: [read]
+    - name: admin
+      env: KRIVY_ADMIN_TOKEN
+      scopes: [read, scan, manage]
+    - name: dashboard
+      sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      scopes: [read]
+notifications:
+  baseURL: https://krivy.example.com
+  destinations:
+    - name: slack
+      url: "${KRIVY_SLACK_WEBHOOK_URL}"
+      events: [new_critical, resolved]
+      template: |
+        {"text": {{ quote (printf "Krivy %s: %d finding(s)" .Event.Type .Count) }}}
+    - name: telegram
+      url: "https://api.telegram.org/bot${KRIVY_TELEGRAM_BOT_TOKEN}/sendMessage"
+      events: [new_critical, scan_failed]
+      secrets:
+        chatID: "${KRIVY_TELEGRAM_CHAT_ID}"
+      template: |
+        {"chat_id": {{ quote .Secrets.chatID }}, "text": {{ quote (printf "Krivy %s: %d finding(s)" .Event.Type .Count) }}}

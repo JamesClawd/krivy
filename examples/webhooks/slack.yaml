@@ -1,0 +1,23 @@
+# Slack incoming webhook (https://api.slack.com/messaging/webhooks).
+# Env: SLACK_WEBHOOK_URL. Slack mrkdwn treats <, > and & specially; the text
+# below only uses values from scan results, rendered with json for safety.
+notifications:
+  baseURL: https://krivy.example.com
+  destinations:
+    - name: slack
+      url: ${SLACK_WEBHOOK_URL}
+      events: [new_critical, resolved, scan_failed]
+      namespaces: [payments, checkout]   # only findings affecting these namespaces
+      template: |
+        {{- $msg := "" -}}
+        {{- if eq .Event.Type "scan_failed" -}}
+          {{- $msg = printf ":x: Krivy scan %s failed: %s" .Scan.ID (default "unknown error" .Scan.Error) -}}
+        {{- else if eq .Event.Type "resolved" -}}
+          {{- $msg = printf ":white_check_mark: %d vulnerabilities resolved" .Count -}}
+        {{- else -}}
+          {{- $msg = printf ":rotating_light: %d new critical vulnerabilities" .Count -}}
+        {{- end -}}
+        {{- range first 20 .Findings -}}
+          {{- $msg = printf "%s\n• %s %s %s → %s (%s)" $msg .VulnerabilityID .PkgName .InstalledVersion (default "no fix" .FixedVersion) (join ", " .Namespaces) -}}
+        {{- end -}}
+        {"text": {{ json $msg }}}

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "krivy.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krivy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "krivy.selectorLabels" . | nindent 4 }}

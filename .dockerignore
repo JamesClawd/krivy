@@ -1,0 +1,21 @@
+# Keep the build context small; only Go sources are needed.
+.git
+.github
+.dev
+bin
+dist
+charts
+docs
+hack
+test
+*.db
+*.db-shm
+*.db-wal
+*.tgz
+coverage.out
+.env
+.idea
+.vscode
+**/*_test.go
+Dockerfile
+.dockerignore

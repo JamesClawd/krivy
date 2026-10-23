@@ -1,0 +1,31 @@
+# Telegram Bot API sendMessage. Plain text (no parse_mode), so no HTML/Markdown
+# escaping is needed; the json function escapes the text for JSON.
+# Env: TELEGRAM_BOT_TOKEN (from @BotFather), TELEGRAM_CHAT_ID.
+# Note: Telegram inline "acknowledge" buttons are NOT supported: Krivy webhooks
+# are outbound-only. Acknowledge findings via the REST API or MCP.
+notifications:
+  baseURL: https://krivy.example.com
+  destinations:
+    - name: telegram
+      url: https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage
+      events: [new_critical, resolved, scan_failed]
+      secrets:
+        chatId: ${TELEGRAM_CHAT_ID}
+      template: |
+        {{- $msg := "" -}}
+        {{- if eq .Event.Type "scan_failed" -}}
+          {{- $msg = printf "Krivy scan failed (%s %s)\n%s" .Scan.Scope (default "cluster" .Scan.Namespace) (default "unknown error" .Scan.Error) -}}
+        {{- else -}}
+          {{- if eq .Event.Type "new_critical" -}}
+            {{- $msg = printf "%d new critical vulnerabilities" .Count -}}
+          {{- else -}}
+            {{- $msg = printf "%d vulnerabilities resolved" .Count -}}
+          {{- end -}}
+          {{- if .Event.Cluster }}{{ $msg = printf "%s in %s" $msg .Event.Cluster }}{{ end -}}
+          {{- range first 15 .Findings -}}
+            {{- $msg = printf "%s\n\n%s (%s) %s %s -> %s\n%s\n%s" $msg .VulnerabilityID .Severity .PkgName .InstalledVersion (default "no fix" .FixedVersion) .ImageRef (join ", " .Workloads) -}}
+          {{- end -}}
+          {{- if gt .Count 15 }}{{ $msg = printf "%s\n\n...and %d more" $msg (sub .Count 15) }}{{ end -}}
+        {{- end -}}
+        {{- if .BaseURL }}{{ $msg = printf "%s\n\n%s" $msg .BaseURL }}{{ end -}}
+        {"chat_id": {{ json .Secrets.chatId }}, "text": {{ json (truncate 4000 $msg) }}, "disable_web_page_preview": true}

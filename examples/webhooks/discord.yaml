@@ -1,0 +1,20 @@
+# Discord channel webhook (Channel settings -> Integrations -> Webhooks).
+# Env: DISCORD_WEBHOOK_URL (the full https://discord.com/api/webhooks/<id>/<token> URL).
+# allowed_mentions.parse=[] stops package names or titles from pinging @everyone.
+notifications:
+  destinations:
+    - name: discord
+      url: ${DISCORD_WEBHOOK_URL}
+      events: [new_critical, scan_failed]
+      template: |
+        {{- $msg := "" -}}
+        {{- if eq .Event.Type "scan_failed" -}}
+          {{- $msg = printf ":x: **Krivy scan failed**: %s" (default "unknown error" .Scan.Error) -}}
+        {{- else -}}
+          {{- $msg = printf ":rotating_light: **%d new critical vulnerabilities**" .Count -}}
+          {{- range first 10 .Findings -}}
+            {{- $msg = printf "%s\n- `%s` %s %s (fixed: %s) in `%s`" $msg .VulnerabilityID .PkgName .InstalledVersion (default "none" .FixedVersion) .ImageRef -}}
+          {{- end -}}
+          {{- if gt .Count 10 }}{{ $msg = printf "%s\n...and %d more" $msg (sub .Count 10) }}{{ end -}}
+        {{- end -}}
+        {"username": "Krivy", "content": {{ json (truncate 1900 $msg) }}, "allowed_mentions": {"parse": []}}
