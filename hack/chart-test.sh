@@ -4,7 +4,7 @@
 # Requires: helm. Optional: kubeconform (schema validation of rendered manifests).
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 CHART="$ROOT/charts/krivy"
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t krivy-chart)
 trap 'rm -rf "$TMP"' EXIT INT TERM

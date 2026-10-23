@@ -22,7 +22,7 @@ set -eu
 
 CLUSTER=krivy-dev
 CONTEXT=k3d-$CLUSTER
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 DEV_DIR=$ROOT/.dev
 KUBECONFIG_FILE=$DEV_DIR/kubeconfig
 SEED=$ROOT/hack/dev/seed.yaml
