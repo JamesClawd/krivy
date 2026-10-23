@@ -258,7 +258,7 @@ func setDefault(p *string, v string) {
 func Load(path string) (*Config, error) {
 	c := &Config{}
 	if path != "" {
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(path) //nolint:gosec // operator-supplied config path
 		if err != nil {
 			return nil, fmt.Errorf("read config: %w", err)
 		}

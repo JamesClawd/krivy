@@ -713,7 +713,7 @@ func (e *Engine) backoff(attempt int) time.Duration {
 		return d
 	}
 	half := d / 2
-	return half + rand.N(d-half+1)
+	return half + rand.N(d-half+1) //nolint:gosec // retry jitter, not security-sensitive
 }
 
 func (e *Engine) finish(del *store.NotificationDelivery, status string, code int, lastErr string) {

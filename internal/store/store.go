@@ -244,7 +244,7 @@ func (s *GormStore) ListScanRuns(ctx context.Context, f ScanRunFilter) ([]ScanRu
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	p := f.Page.normalized()
+	p := f.normalized()
 	var out []ScanRun
 	err := q.Order("created_at DESC").Limit(p.Limit).Offset(p.Offset).Find(&out).Error
 	return out, total, err
@@ -430,7 +430,7 @@ func (s *GormStore) ListFindings(ctx context.Context, f FindingFilter) ([]Findin
 	if err := s.findingQuery(ctx, f).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	p := f.Page.normalized()
+	p := f.normalized()
 	var out []Finding
 	err := s.findingQuery(ctx, f).
 		Order("findings.first_seen_at DESC, findings.id").

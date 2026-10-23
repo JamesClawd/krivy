@@ -36,6 +36,10 @@ linters:
           disabled: true
     misspell:
       locale: US
+      # "cancelled" is part of the public API (scan/job status values).
+      ignore-rules:
+        - cancelled
+        - cancelling
   exclusions:
     generated: lax
     presets:

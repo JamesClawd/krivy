@@ -63,7 +63,7 @@ func New(svc service.API, a *auth.Authenticator, version string) http.Handler {
 	verifier := func(_ context.Context, token string, _ *http.Request) (*sdkauth.TokenInfo, error) {
 		p, err := a.Verify(token)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", sdkauth.ErrInvalidToken, err)
+			return nil, fmt.Errorf("%w: %w", sdkauth.ErrInvalidToken, err)
 		}
 		scopes := make([]string, 0, len(p.Scopes))
 		for sc, ok := range p.Scopes {

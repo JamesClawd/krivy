@@ -734,7 +734,7 @@ func TestCancelPending(t *testing.T) {
 	if err != nil || got.Status != store.StatusCancelled || !got.CancelRequested || got.FinishedAt == nil {
 		t.Fatalf("cancel = %+v, %v", got, err)
 	}
-	// Cancelling a terminal run is a no-op.
+	// Canceling a terminal run is a no-op.
 	again, err := h.o.Cancel(ctx, run.ID)
 	if err != nil || again.Status != store.StatusCancelled {
 		t.Fatalf("second cancel = %+v, %v", again, err)

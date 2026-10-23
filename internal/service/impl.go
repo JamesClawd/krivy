@@ -284,7 +284,7 @@ func validName(s string) bool {
 	}
 	for i, c := range s {
 		alnum := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
-		if !alnum && !(c == '-' && i > 0 && i < len(s)-1) {
+		if !alnum && (c != '-' || i == 0 || i == len(s)-1) {
 			return false
 		}
 	}

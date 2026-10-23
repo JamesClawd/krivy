@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -158,7 +159,7 @@ func BuildJob(cfg Config, t Target) *batchv1.Job {
 	if deadline < 1 {
 		deadline = 1
 	}
-	ttl := int32(cfg.TTLAfterFinished / time.Second)
+	ttl := int32(min(int64(cfg.TTLAfterFinished/time.Second), math.MaxInt32)) //nolint:gosec // clamped to int32 range
 
 	volumes := []corev1.Volume{
 		{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: sizeLimit}}},

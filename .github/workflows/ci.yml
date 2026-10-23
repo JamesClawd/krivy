@@ -54,7 +54,7 @@ jobs:
         run: go vet ./...
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.15.0
       - name: shell scripts
         run: |
           for f in hack/*.sh; do sh -n "$f"; done

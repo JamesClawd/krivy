@@ -54,7 +54,7 @@ func NewKubernetes(client kubernetes.Interface, cfg Config) Scanner {
 }
 
 func kerr(msg string, err error) *Error {
-	retry := !(apierrors.IsForbidden(err) || apierrors.IsInvalid(err) || apierrors.IsUnauthorized(err))
+	retry := !apierrors.IsForbidden(err) && !apierrors.IsInvalid(err) && !apierrors.IsUnauthorized(err)
 	return &Error{Kind: KindKubernetes, Retryable: retry, Msg: msg, Err: err}
 }
 
@@ -77,13 +77,14 @@ func (s *kubeScanner) Scan(ctx context.Context, t Target) (*Result, error) {
 		return nil, kerr("create scanner job "+want.Name, err)
 	}
 
-	res, err := s.wait(ctx, t, job)
+	res, err := s.wait(ctx, job)
 	if ctx.Err() != nil {
 		s.onCancel(ctx, want.Name)
 		return nil, ctx.Err()
 	}
 	if err != nil {
-		if se, ok := err.(*Error); ok {
+		var se *Error
+		if errors.As(err, &se) {
 			if se.Kind == KindScheduling || se.Kind == KindTimeout {
 				// Pods stuck pending would otherwise linger until the deadline.
 				s.cleanup(want.Name)
@@ -127,7 +128,7 @@ func jobCondition(job *batchv1.Job, typ batchv1.JobConditionType) *batchv1.JobCo
 	return nil
 }
 
-func (s *kubeScanner) wait(ctx context.Context, t Target, job *batchv1.Job) (*Result, error) {
+func (s *kubeScanner) wait(ctx context.Context, job *batchv1.Job) (*Result, error) {
 	name := job.Name
 	start := job.CreationTimestamp.Time
 	if start.IsZero() {
@@ -213,7 +214,7 @@ func (s *kubeScanner) checkPending(ctx context.Context, jobName string, start ti
 	}
 	pods, err := s.pods(ctx, jobName)
 	if err != nil || len(pods) == 0 {
-		return nil // transient; the deadline still applies
+		return nil //nolint:nilerr // transient lookup failure; the Job deadline still applies
 	}
 	pod := &pods[0]
 	if pod.Status.Phase != corev1.PodPending {
