@@ -370,10 +370,10 @@ func basicAuthInitFailure(secret string, term *corev1.ContainerStateTerminated) 
 		code, _, _ = strings.Cut(after, "\n")
 		code = strings.TrimSpace(code)
 	}
-	switch {
-	case code == "server-changed":
+	switch code {
+	case "server-changed":
 		return fmt.Sprintf("registry auth Secret %q changed its server after the scan started; the next scan uses the new value", secret)
-	case code == "missing-server" || code == "missing-username" || code == "missing-password":
+	case "missing-server", "missing-username", "missing-password":
 		return fmt.Sprintf("registry auth Secret %q was deleted or lost its %s key after the scan started; fix it (the next scan re-reads it)", secret, strings.TrimPrefix(code, "missing-"))
 	default:
 		return fmt.Sprintf("could not build the Docker config from registry auth Secret %q: init container %s exited with code %d (%s); the Trivy image must provide sh, cat, base64 and tr on its PATH",
