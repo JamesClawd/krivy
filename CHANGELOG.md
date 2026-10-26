@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Private registry credentials via existing Secrets:
+  `kubernetes.registryAuth.existingSecrets` (chart:
+  `scanner.registryAuth.existingSecrets`) lists
+  `kubernetes.io/dockerconfigjson` Secrets in the job namespace, in priority
+  order. For each image the controller selects the one matching Secret, using
+  the same host and path rules as Trivy, and mounts only that Secret
+  read-only into the scanner pod. Public images get no credentials. Secrets
+  are re-read on every scan, so rotation needs no restart. The chart grants
+  `get` on exactly the configured Secret names. See
+  `docs/private-registries.md`.
+- Scan failure kind `registry_auth` (not retried) for absent, unreadable,
+  malformed or ambiguous registry Secrets (no Job is created) and for
+  registry `unauthorized`/`denied`/403 responses. Messages name the Secret and
+  registry, with hints for near misses, and never contain credentials.
+
+### Changed
+
+- `image_pull` now covers only images that do not exist (manifest or name
+  unknown). Authentication failures are reported as `registry_auth`.
+- The registry Secret is no longer mounted into every scanner pod, only into
+  pods scanning an image that the Secret has an entry for. The controller now
+  reads the configured Secrets (`get` in the job namespace only). The chart
+  grants this; deployments that don't use the chart and set `registrySecret`
+  must grant `get` on that Secret.
+
+### Deprecated
+
+- `kubernetes.registrySecret` / `scanner.registrySecret`: use
+  `registryAuth.existingSecrets`. A value that is still set is treated as the
+  first entry.
+
 ## [0.1.0]
 
 Initial release.

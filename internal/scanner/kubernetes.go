@@ -60,7 +60,14 @@ func kerr(msg string, err error) *Error {
 
 func (s *kubeScanner) Scan(ctx context.Context, t Target) (*Result, error) {
 	started := s.now()
-	want := BuildJob(s.cfg, t)
+	auth, err := s.resolveAuth(ctx, t.ImageRef)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, err
+	}
+	want := BuildJob(s.cfg, t, auth.secret)
 	jobs := s.client.BatchV1().Jobs(s.cfg.Namespace)
 
 	job, err := jobs.Create(ctx, want, metav1.CreateOptions{})
@@ -77,7 +84,7 @@ func (s *kubeScanner) Scan(ctx context.Context, t Target) (*Result, error) {
 		return nil, kerr("create scanner job "+want.Name, err)
 	}
 
-	res, err := s.wait(ctx, job)
+	res, err := s.wait(ctx, job, auth)
 	if ctx.Err() != nil {
 		s.onCancel(ctx, want.Name)
 		return nil, ctx.Err()
@@ -89,8 +96,8 @@ func (s *kubeScanner) Scan(ctx context.Context, t Target) (*Result, error) {
 				// Pods stuck pending would otherwise linger until the deadline.
 				s.cleanup(want.Name)
 			}
-			se.Diagnostics = strings.TrimSpace(fmt.Sprintf("job=%s reused=%v elapsed=%s\n%s",
-				want.Name, reused, s.now().Sub(started).Round(time.Second), se.Diagnostics))
+			se.Diagnostics = strings.TrimSpace(fmt.Sprintf("job=%s reused=%v elapsed=%s %s\n%s",
+				want.Name, reused, s.now().Sub(started).Round(time.Second), auth.describe(), se.Diagnostics))
 		}
 		return nil, err
 	}
@@ -128,7 +135,7 @@ func jobCondition(job *batchv1.Job, typ batchv1.JobConditionType) *batchv1.JobCo
 	return nil
 }
 
-func (s *kubeScanner) wait(ctx context.Context, job *batchv1.Job) (*Result, error) {
+func (s *kubeScanner) wait(ctx context.Context, job *batchv1.Job, auth *authResolution) (*Result, error) {
 	name := job.Name
 	start := job.CreationTimestamp.Time
 	if start.IsZero() {
@@ -147,7 +154,7 @@ func (s *kubeScanner) wait(ctx context.Context, job *batchv1.Job) (*Result, erro
 			return s.collect(ctx, job)
 		}
 		if c := jobCondition(job, batchv1.JobFailed); c != nil {
-			return nil, s.classifyFailure(ctx, job, c)
+			return nil, s.classifyFailure(ctx, job, c, auth)
 		}
 		if err := s.checkPending(ctx, name, start); err != nil {
 			return nil, err
@@ -275,7 +282,7 @@ func (s *kubeScanner) collect(ctx context.Context, job *batchv1.Job) (*Result, e
 	return res, nil
 }
 
-func (s *kubeScanner) classifyFailure(ctx context.Context, job *batchv1.Job, cond *batchv1.JobCondition) error {
+func (s *kubeScanner) classifyFailure(ctx context.Context, job *batchv1.Job, cond *batchv1.JobCondition, auth *authResolution) error {
 	var (
 		pod     *corev1.Pod
 		logTail string
@@ -308,7 +315,7 @@ func (s *kubeScanner) classifyFailure(ctx context.Context, job *batchv1.Job, con
 	if logTail != "" {
 		diag.WriteString("\n--- log tail ---\n" + redact(logTail))
 	}
-	e := &Error{Diagnostics: diag.String()}
+	e := &Error{Diagnostics: redactValues(diag.String(), auth.redact)}
 
 	lower := strings.ToLower(logTail)
 	switch {
@@ -319,8 +326,19 @@ func (s *kubeScanner) classifyFailure(ctx context.Context, job *batchv1.Job, con
 		strings.Contains(lower, "db download error") ||
 		strings.Contains(lower, "failed to download artifact"):
 		e.Kind, e.Retryable, e.Msg = KindScanner, true, "vulnerability DB download failed"
+	case isAuthError(lower):
+		var hints []string
+		e.Kind, e.Retryable = KindRegistryAuth, false
+		e.Msg, hints = auth.authFailure()
+		if mounted := job.Annotations[AnnotationRegistryAuth]; mounted != "" && mounted != auth.secret {
+			// Re-attached to a Job created before the configuration changed.
+			e.Msg = fmt.Sprintf("registry rejected the credentials from Secret %q; update the Secret (the next scan uses the new value)", mounted)
+		}
+		if len(hints) > 0 {
+			e.Diagnostics += "\n--- hints ---\n" + strings.Join(hints, "\n")
+		}
 	case isImageFetchError(lower):
-		e.Kind, e.Retryable, e.Msg = KindImagePull, false, "trivy could not fetch the image (auth or not found)"
+		e.Kind, e.Retryable, e.Msg = KindImagePull, false, "trivy could not find the image (manifest or repository unknown)"
 	case term != nil && term.Reason == "OOMKilled":
 		e.Kind, e.Retryable, e.Msg = KindScanner, true, "scanner OOMKilled"
 	default:
@@ -333,9 +351,27 @@ func (s *kubeScanner) classifyFailure(ctx context.Context, job *batchv1.Job, con
 	return e
 }
 
+// authMarkers are registry responses to missing or rejected credentials.
+// Registries such as Docker Hub also answer DENIED for repositories that do
+// not exist, which the message mentions. A bare "denied" is not a marker:
+// "permission denied" is a local filesystem error.
+var authMarkers = []string{
+	"unauthorized", "authentication required", "denied:", "access to the resource is denied", "403 forbidden",
+	"status code 403", "incorrect username or password", "invalid username/password",
+	"error getting credentials", "failed to load config file",
+}
+
+func isAuthError(lower string) bool {
+	for _, m := range authMarkers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
 var imageFetchMarkers = []string{
-	"unauthorized", "authentication required", "denied", "manifest_unknown",
-	"manifest unknown", "name_unknown", "name unknown", "unable to find the specified image",
+	"manifest_unknown", "manifest unknown", "name_unknown", "name unknown", "unable to find the specified image",
 }
 
 func isImageFetchError(lower string) bool {

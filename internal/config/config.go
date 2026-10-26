@@ -55,11 +55,36 @@ type KubernetesConfig struct {
 	ExcludeNamespaces []string `json:"excludeNamespaces"`
 	// ScannerServiceAccount is the low-privilege SA used by scanner Jobs.
 	ScannerServiceAccount string `json:"scannerServiceAccount"`
-	// ImagePullSecrets are attached to scanner Jobs for private registries.
+	// ImagePullSecrets are attached to scanner Job Pods; the kubelet uses them
+	// only to pull the Trivy image itself.
 	ImagePullSecrets []string `json:"imagePullSecrets"`
-	// RegistrySecret optionally names a dockerconfigjson Secret in JobNamespace
-	// mounted into scanner Pods so Trivy can pull private images.
+	// RegistryAuth configures the credentials Trivy uses for the images it scans.
+	RegistryAuth RegistryAuthConfig `json:"registryAuth"`
+	// RegistrySecret is deprecated: use RegistryAuth.ExistingSecrets. When set
+	// it is checked before the ExistingSecrets.
 	RegistrySecret string `json:"registrySecret"`
+}
+
+// RegistryAuthConfig references existing registry credential Secrets.
+type RegistryAuthConfig struct {
+	// ExistingSecrets are kubernetes.io/dockerconfigjson Secrets in
+	// JobNamespace, in priority order. Krivy never creates or stores them.
+	ExistingSecrets []string `json:"existingSecrets"`
+}
+
+// RegistryAuthSecrets returns the deprecated RegistrySecret followed by
+// RegistryAuth.ExistingSecrets, without duplicates.
+func (k KubernetesConfig) RegistryAuthSecrets() []string {
+	var out []string
+	if k.RegistrySecret != "" {
+		out = append(out, k.RegistrySecret)
+	}
+	for _, s := range k.RegistryAuth.ExistingSecrets {
+		if s != k.RegistrySecret {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 type ScanConfig struct {
@@ -313,6 +338,9 @@ func Parse(raw []byte, c *Config, lookup LookupFunc) error {
 	return nil
 }
 
+// secretName is a DNS-1123 subdomain, the format of Kubernetes Secret names.
+var secretName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+
 var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // Expand replaces ${VAR} with its value; "$${" escapes a literal "${".
@@ -384,6 +412,19 @@ func (c *Config) Validate() error {
 	}
 	if c.Scan.MaxConcurrentJobs > 50 {
 		errs = append(errs, errors.New("scan.maxConcurrentJobs must be <= 50"))
+	}
+	seenSecrets := map[string]bool{}
+	for i, name := range c.Kubernetes.RegistryAuth.ExistingSecrets {
+		if !secretName.MatchString(name) || len(name) > 253 {
+			errs = append(errs, fmt.Errorf("kubernetes.registryAuth.existingSecrets[%d]: %q is not a valid Secret name", i, name))
+		}
+		if seenSecrets[name] {
+			errs = append(errs, fmt.Errorf("kubernetes.registryAuth.existingSecrets: duplicate Secret %q", name))
+		}
+		seenSecrets[name] = true
+	}
+	if n := c.Kubernetes.RegistrySecret; n != "" && (!secretName.MatchString(n) || len(n) > 253) {
+		errs = append(errs, fmt.Errorf("kubernetes.registrySecret: %q is not a valid Secret name", n))
 	}
 	names := map[string]bool{}
 	for i, t := range c.Auth.Tokens {

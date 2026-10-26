@@ -163,6 +163,7 @@ helm --kubeconfig .dev/kubeconfig --kube-context k3d-krivy-dev upgrade --install
 | API server unreachable after a reboot | `make dev-start`. This restarts the containers and refreshes `.dev/kubeconfig` in case the port changed. |
 | Port conflict when creating the cluster | k3d picks a random API port. Remove stale clusters with `k3d cluster list` / `make dev-destroy`. |
 | Scanner Job stuck `Pending` | Not enough memory or ephemeral storage in the Docker VM. Raise the VM size, or lower `trivy.resources` in `hack/dev/krivy.yaml`. |
+| Scan fails with `registry_auth` | The image is private and no valid `registryAuth` Secret covers it; see [private registries](private-registries.md#errors). |
 | Scan fails with `image_pull` / DB download errors | The scanner pod has no internet access, or a corporate proxy is in the way. Check `kubectl … -n krivy-system logs job/<name>`. |
 | `config references unset environment variables` | Export the variables named in the error, or remove the references. |
 | Colima: `k3d cluster create` hangs | Use `colima start --network-address` and a recent k3d. Make sure `DOCKER_HOST` matches `docker context inspect`. |

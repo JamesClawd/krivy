@@ -48,9 +48,10 @@ type Config struct {
 	ServiceAccount string
 	// ImagePullSecrets are used only to pull the Trivy image itself.
 	ImagePullSecrets []string
-	// RegistrySecret names a kubernetes.io/dockerconfigjson Secret mounted for
-	// Trivy to authenticate to private registries.
-	RegistrySecret string
+	// RegistrySecrets are kubernetes.io/dockerconfigjson Secrets in Namespace,
+	// in priority order. Per image at most one of them is mounted read-only
+	// for Trivy (see registryauth.go); the controller needs get on each.
+	RegistrySecrets []string
 	// ExtraArgs are inserted before the image reference.
 	ExtraArgs []string
 	// PollInterval between Job status checks; default 2s.
@@ -88,7 +89,7 @@ func ConfigFrom(c *config.Config) Config {
 		},
 		ServiceAccount:   c.Kubernetes.ScannerServiceAccount,
 		ImagePullSecrets: append([]string(nil), c.Kubernetes.ImagePullSecrets...),
-		RegistrySecret:   c.Kubernetes.RegistrySecret,
+		RegistrySecrets:  c.Kubernetes.RegistryAuthSecrets(),
 		ExtraArgs:        append([]string(nil), c.Trivy.ExtraArgs...),
 	}
 }

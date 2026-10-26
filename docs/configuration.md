@@ -32,8 +32,11 @@ kubernetes:
   scannerServiceAccount: krivy-scanner  # ServiceAccount of scanner pods (token never mounted)
   imagePullSecrets: []        # pod imagePullSecrets on scanner Jobs: only used by the kubelet
                               # to pull the Trivy image itself
-  registrySecret: ""          # kubernetes.io/dockerconfigjson Secret in jobNamespace, mounted
-                              # into scanner pods so Trivy can pull private images it scans
+  registryAuth:
+    existingSecrets: []       # kubernetes.io/dockerconfigjson Secrets in jobNamespace, in priority
+                              # order; per image at most one is mounted read-only so Trivy can pull
+                              # the private image it scans (docs/private-registries.md)
+  registrySecret: ""          # deprecated: checked before registryAuth.existingSecrets
 
 scan:
   schedule: "@every 12h"      # 5-field cron, descriptor (@daily, @hourly, ...) or "@every <duration>"

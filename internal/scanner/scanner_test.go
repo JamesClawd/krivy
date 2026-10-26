@@ -112,7 +112,6 @@ func TestParseReportInvalid(t *testing.T) {
 
 func testConfig() Config {
 	c := ConfigFrom(config.Default())
-	c.RegistrySecret = "regcred"
 	c.ImagePullSecrets = []string{"pull-trivy"}
 	c.ExtraArgs = []string{"--ignore-unfixed"}
 	c.PollInterval = 5 * time.Millisecond
@@ -122,7 +121,7 @@ func testConfig() Config {
 func TestBuildJobSecurity(t *testing.T) {
 	cfg := testConfig()
 	tgt := Target{ScanJobID: "0B1C2D3E-aaaa-bbbb-cccc-ddddeeeeffff", ImageRef: "docker.io/library/nginx@sha256:11", Attempt: 2}
-	j := BuildJob(cfg, tgt)
+	j := BuildJob(cfg, tgt, "regcred")
 
 	if j.Name != "krivy-scan-0b1c2d3e-2" || len(validation.IsDNS1123Label(j.Name)) != 0 {
 		t.Errorf("name %q", j.Name)
@@ -163,9 +162,12 @@ func TestBuildJobSecurity(t *testing.T) {
 		if v.EmptyDir != nil && v.EmptyDir.SizeLimit == nil {
 			t.Errorf("emptyDir %s without sizeLimit", v.Name)
 		}
-		if v.Secret != nil && (v.Secret.SecretName != "regcred" || v.Secret.Items[0].Key != ".dockerconfigjson" || v.Secret.Items[0].Path != "config.json") {
+		if v.Secret != nil && (v.Secret.SecretName != "regcred" || len(v.Secret.Items) != 1 || v.Secret.Items[0].Key != ".dockerconfigjson" || v.Secret.Items[0].Path != "config.json" || *v.Secret.DefaultMode != 0o440) {
 			t.Errorf("registry secret volume %+v", v.Secret)
 		}
+	}
+	if j.Annotations[AnnotationRegistryAuth] != "regcred" {
+		t.Errorf("registry auth annotation %v", j.Annotations)
 	}
 	c := p.Containers[0]
 	csc := c.SecurityContext
@@ -185,6 +187,20 @@ func TestBuildJobSecurity(t *testing.T) {
 	if env["HOME"] != "/tmp" || env["TRIVY_CACHE_DIR"] != "/tmp/trivy-cache" || env["DOCKER_CONFIG"] != "/tmp/.docker" {
 		t.Errorf("env %v", env)
 	}
+	for _, e := range c.Env {
+		if e.ValueFrom != nil {
+			t.Errorf("env %s must not come from a Secret", e.Name)
+		}
+	}
+	authMount := false
+	for _, m := range c.VolumeMounts {
+		if m.Name == "registry-auth" {
+			authMount = m.ReadOnly && m.MountPath == "/tmp/.docker"
+		}
+	}
+	if !authMount {
+		t.Errorf("registry-auth must be mounted read-only at /tmp/.docker: %+v", c.VolumeMounts)
+	}
 	args := strings.Join(append(c.Command, c.Args...), " ")
 	for _, want := range []string{"trivy image", "--format json", "--scanners vuln", "--severity CRITICAL", "--quiet", "--no-progress", "--timeout 13m30s", "--output /dev/stdout", "--ignore-unfixed -- docker.io/library/nginx@sha256:11"} {
 		if !strings.Contains(args, want) {
@@ -192,13 +208,20 @@ func TestBuildJobSecurity(t *testing.T) {
 		}
 	}
 
-	// Without RegistrySecret no secret volume / DOCKER_CONFIG.
-	cfg.RegistrySecret = ""
-	j = BuildJob(cfg, tgt)
+	// Without a selected Secret: no secret volume, DOCKER_CONFIG or annotation.
+	j = BuildJob(cfg, tgt, "")
 	for _, v := range j.Spec.Template.Spec.Volumes {
 		if v.Secret != nil {
 			t.Error("unexpected secret volume")
 		}
+	}
+	for _, e := range j.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "DOCKER_CONFIG" {
+			t.Error("unexpected DOCKER_CONFIG")
+		}
+	}
+	if _, ok := j.Annotations[AnnotationRegistryAuth]; ok {
+		t.Error("unexpected registry auth annotation")
 	}
 }
 
@@ -353,7 +376,11 @@ func TestScanFailureClassification(t *testing.T) {
 		{"deadline", "", terminated(137, "Error"),
 			batchv1.JobCondition{Type: batchv1.JobFailed, Reason: batchv1.JobReasonDeadlineExceeded}, KindTimeout, true},
 		{"unauthorized", "FATAL\timage scan error: GET https://registry/v2/x/manifests/y: UNAUTHORIZED: authentication required; password=hunter2",
-			terminated(1, "Error"), batchv1.JobCondition{Type: batchv1.JobFailed, Reason: "BackoffLimitExceeded"}, KindImagePull, false},
+			terminated(1, "Error"), batchv1.JobCondition{Type: batchv1.JobFailed, Reason: "BackoffLimitExceeded"}, KindRegistryAuth, false},
+		{"denied", "remote error: DENIED: requested access to the resource is denied",
+			terminated(1, "Error"), batchv1.JobCondition{Type: batchv1.JobFailed, Reason: "BackoffLimitExceeded"}, KindRegistryAuth, false},
+		{"local permission denied is not registry auth", "FATAL mkdir /tmp/trivy-cache/db: permission denied",
+			terminated(1, "Error"), batchv1.JobCondition{Type: batchv1.JobFailed, Reason: "BackoffLimitExceeded"}, KindScanner, true},
 		{"manifest unknown", "remote error: MANIFEST_UNKNOWN: manifest unknown",
 			terminated(1, "Error"), batchv1.JobCondition{Type: batchv1.JobFailed, Reason: "BackoffLimitExceeded"}, KindImagePull, false},
 		{"image not found", "unable to inspect the image: image not found in remote",
@@ -435,7 +462,7 @@ func TestScanReattachesToCompletedJob(t *testing.T) {
 	h.logs = fixture(t, "vulnerable.json")
 	ctx := withTimeout(t)
 	// A previous controller instance created the Job and it already finished.
-	j := BuildJob(h.cfg, h.tgt)
+	j := BuildJob(h.cfg, h.tgt, "")
 	j.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
 	if _, err := h.client.BatchV1().Jobs(h.cfg.Namespace).Create(ctx, j, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
