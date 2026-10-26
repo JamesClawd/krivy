@@ -100,6 +100,12 @@ func run() error {
 	if err := scfg.Validate(); err != nil {
 		return fmt.Errorf("trivy config: %w", err)
 	}
+	if cfg.Kubernetes.RegistrySecret != "" {
+		log.Warn("kubernetes.registrySecret is deprecated; use kubernetes.registryAuth.existingSecrets")
+	}
+	if len(scfg.RegistrySecrets) > 0 {
+		log.Info("registry auth configured", "secrets", scfg.RegistrySecrets, "namespace", scfg.Namespace)
+	}
 	disc := discovery.NewKubernetes(client, discovery.Options{ExcludeNamespaces: cfg.Kubernetes.ExcludeNamespaces})
 	sc := scanner.NewKubernetes(client, scfg)
 	orch := orchestrator.New(st, disc, sc, notifier, orchestrator.Options{

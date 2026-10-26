@@ -50,6 +50,7 @@ render default -f "$CHART/ci/default-values.yaml"
 render postgres -f "$CHART/ci/postgres-values.yaml"
 render netpol -f "$CHART/ci/networkpolicy-values.yaml"
 render nswatch -f "$CHART/ci/namespaced-watch-values.yaml"
+render regauth -f "$CHART/ci/registry-auth-values.yaml"
 
 echo "== defaults (sqlite)"
 F="$TMP/defaults.yaml"
@@ -80,17 +81,25 @@ assert_grep "scanner ServiceAccount exists" '^  name: krivy-scanner$' "$TMP/sa.y
 assert_eq "scanner SA does not automount token" 1 "$(grep -c '^automountServiceAccountToken: false$' "$TMP/sa.yaml")"
 
 echo "== RBAC is minimal"
-for r in defaults postgres netpol nswatch; do
+for r in defaults postgres netpol nswatch regauth; do
   F="$TMP/$r.yaml"
   { doc_of_kind "$F" ClusterRole; doc_of_kind "$F" Role; } >"$TMP/rbac-$r.yaml"
   assert_no_grep "[$r] no wildcard verbs/resources" '"\*"' "$TMP/rbac-$r.yaml"
-  assert_no_grep "[$r] no access to secrets/configmaps" '"(secrets|configmaps)"' "$TMP/rbac-$r.yaml"
-  bad=$(grep -E '^ +resources:' "$TMP/rbac-$r.yaml" | grep -vE 'resources: \["(pods|pods/log|replicasets|jobs)"\]$' || true)
-  assert_eq "[$r] resources limited to pods, pods/log, replicasets, jobs" "" "$bad"
+  assert_no_grep "[$r] no access to configmaps" '"configmaps"' "$TMP/rbac-$r.yaml"
+  # Secrets only for registry auth: get, by name, in the job namespace Role.
+  secret_rules=$(grep -c 'resources: \["secrets"\]' "$TMP/rbac-$r.yaml" || true)
+  named_secret_rules=$(grep -A1 'resources: \["secrets"\]' "$TMP/rbac-$r.yaml" | grep -c 'resourceNames: \["' || true)
+  assert_eq "[$r] secrets rules are restricted by resourceNames" "$secret_rules" "$named_secret_rules"
+  doc_of_kind "$F" ClusterRole >"$TMP/rbac-$r-cluster.yaml"
+  assert_no_grep "[$r] ClusterRole has no access to secrets" '"secrets"' "$TMP/rbac-$r-cluster.yaml"
+  bad=$(grep -E '^ +resources:' "$TMP/rbac-$r.yaml" | grep -vE 'resources: \["(pods|pods/log|replicasets|jobs|secrets)"\]$' || true)
+  assert_eq "[$r] resources limited to pods, pods/log, replicasets, jobs, secrets" "" "$bad"
   bad=$(grep -E '^ +verbs:' "$TMP/rbac-$r.yaml" | grep -vE 'verbs: \[("(get|list|watch|create|delete)"(, )?)+\]$' || true)
   assert_eq "[$r] verbs limited to get/list/watch/create/delete" "" "$bad"
   assert_eq "[$r] only one rule grants create (batch/jobs)" 1 "$(grep -c '"create"' "$TMP/rbac-$r.yaml")"
   assert_eq "[$r] only one rule grants delete (batch/jobs)" 1 "$(grep -c '"delete"' "$TMP/rbac-$r.yaml")"
+  bad=$(grep -A2 'resources: \["secrets"\]' "$TMP/rbac-$r.yaml" | grep -E '^ +verbs:' | grep -vE 'verbs: \["get"\]$' || true)
+  assert_eq "[$r] secrets are get-only" "" "$bad"
   # Scanner Jobs never get a PV/PVC: the only claim is the controller's own.
   claims=$(grep -c 'claimName:' "$F" || true)
   if [ "$claims" -le 1 ]; then pass "[$r] at most one claimName (controller only)"; else fail "[$r] unexpected claimName count $claims"; fi
@@ -128,7 +137,25 @@ assert_eq "no ClusterRoleBinding when watchNamespace is set" 0 "$(count_kind "$F
 assert_grep "discovery Role in watched namespace" '^  namespace: production$' "$F"
 assert_grep "job Role in job namespace" '^  namespace: krivy-scans$' "$F"
 assert_eq "no PVC when persistence disabled" 0 "$(count_kind "$F" PersistentVolumeClaim)"
-assert_grep "registrySecret in config" 'registrySecret: "registry-creds"' "$F"
+assert_grep "deprecated registrySecret rendered as registryAuth" '^ +- "registry-creds"$' "$F"
+assert_no_grep "registrySecret key no longer rendered" 'registrySecret:' "$F"
+assert_grep "get on the deprecated registrySecret only" 'resourceNames: \["registry-creds"\]' "$F"
+
+echo "== registry auth"
+for r in defaults postgres netpol; do
+  assert_no_grep "[$r] no secrets access without registry auth" '"secrets"' "$TMP/$r.yaml"
+  assert_no_grep "[$r] no registryAuth config without registry auth" 'registryAuth:' "$TMP/$r.yaml"
+done
+F="$TMP/regauth.yaml"
+assert_grep "registryAuth.existingSecrets rendered in order" '^ +existingSecrets:$' "$F"
+assert_eq "existingSecrets order" '- "ghcr-auth" - "internal-registry-auth"' "$(grep -E -A2 '^ +existingSecrets:$' "$F" | tail -n 2 | sed 's/^ *//' | tr '\n' ' ' | sed 's/ $//')"
+doc_of_kind "$F" Role >"$TMP/regauth-role.yaml"
+assert_grep "job namespace Role grants get on exactly the configured Secrets" 'resourceNames: \["ghcr-auth", "internal-registry-auth"\]' "$TMP/regauth-role.yaml"
+assert_eq "chart creates no Secret for registry auth" 0 "$(count_kind "$F" Secret)"
+assert_no_grep "no Secret data in rendered chart" 'dockerconfigjson' "$F"
+if helm template krivy "$CHART" --set 'scanner.registryAuth.existingSecrets={Bad_Name}' >/dev/null 2>&1; then fail "invalid Secret name accepted"; else pass "invalid registry auth Secret name rejected"; fi
+if helm template krivy "$CHART" --set 'scanner.registryAuth.existingSecrets={a,a}' >/dev/null 2>&1; then fail "duplicate Secret accepted"; else pass "duplicate registry auth Secret rejected"; fi
+if helm template krivy "$CHART" --set 'scanner.registryAuth.username=x' >/dev/null 2>&1; then fail "inline credentials accepted"; else pass "inline registry credentials rejected"; fi
 
 echo "== schema rejects invalid values"
 if helm template krivy "$CHART" --set database.driver=mysql >/dev/null 2>&1; then fail "invalid driver accepted"; else pass "invalid driver rejected"; fi
@@ -137,7 +164,7 @@ if helm template krivy "$CHART" --set 'auth.tokens[0].name=x' --set 'auth.tokens
 
 if command -v kubeconform >/dev/null 2>&1; then
   echo "== kubeconform"
-  for r in defaults postgres netpol nswatch; do
+  for r in defaults postgres netpol nswatch regauth; do
     if kubeconform -strict -summary "$TMP/$r.yaml" >/dev/null; then pass "kubeconform $r"; else fail "kubeconform $r"; fi
   done
 fi

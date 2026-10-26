@@ -56,8 +56,11 @@ type ErrorKind string
 const (
 	// KindTimeout: Job exceeded its deadline.
 	KindTimeout ErrorKind = "timeout"
-	// KindImagePull: Trivy could not pull the image (auth / not found).
+	// KindImagePull: Trivy could not find the image (manifest/name unknown).
 	KindImagePull ErrorKind = "image_pull"
+	// KindRegistryAuth: registry credentials are missing, invalid or were
+	// rejected (unauthorized/denied), or a registryAuth Secret is unusable.
+	KindRegistryAuth ErrorKind = "registry_auth"
 	// KindScanner: Trivy exited non-zero for another reason.
 	KindScanner ErrorKind = "scanner"
 	// KindOutput: output missing, truncated or invalid JSON.

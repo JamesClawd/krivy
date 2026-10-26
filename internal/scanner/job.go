@@ -125,8 +125,10 @@ func TrivyArgs(cfg Config, imageRef string) []string {
 }
 
 // BuildJob renders the hardened scanner Job for t. It never uses a PVC and
-// never mounts a ServiceAccount token.
-func BuildJob(cfg Config, t Target) *batchv1.Job {
+// never mounts a ServiceAccount token. registrySecret, if set, is the
+// dockerconfigjson Secret selected for t (see resolveAuth); it is mounted
+// read-only as Trivy's Docker config.
+func BuildJob(cfg Config, t Target, registrySecret string) *batchv1.Job {
 	cfg = cfg.withDefaults()
 	name := JobName(t)
 	labels := map[string]string{
@@ -142,6 +144,9 @@ func BuildJob(cfg Config, t Target) *batchv1.Job {
 		podLabels[k] = v
 	}
 	annotations := map[string]string{AnnotationImage: t.ImageRef}
+	if registrySecret != "" {
+		annotations[AnnotationRegistryAuth] = registrySecret
+	}
 
 	scratch := cfg.ScratchSizeLimit
 	if scratch == "" {
@@ -161,6 +166,7 @@ func BuildJob(cfg Config, t Target) *batchv1.Job {
 	}
 	ttl := int32(min(int64(cfg.TTLAfterFinished/time.Second), math.MaxInt32)) //nolint:gosec // clamped to int32 range
 
+	f, tr := false, true
 	volumes := []corev1.Volume{
 		{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: sizeLimit}}},
 		{Name: "cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: sizeLimit}}},
@@ -176,12 +182,17 @@ func BuildJob(cfg Config, t Target) *batchv1.Job {
 		{Name: "TRIVY_NO_PROGRESS", Value: "true"},
 		{Name: "TRIVY_DISABLE_VEX_NOTICE", Value: "true"},
 	}
-	if cfg.RegistrySecret != "" {
+	if registrySecret != "" {
+		// Only the .dockerconfigjson key, read-only. Trivy reads it as
+		// $DOCKER_CONFIG/config.json (= $HOME/.docker/config.json). Optional,
+		// so a Secret deleted after resolution fails fast as an auth error
+		// instead of leaving the Pod stuck in ContainerCreating.
 		mode := int32(0o440)
 		volumes = append(volumes, corev1.Volume{Name: "registry-auth", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-			SecretName:  cfg.RegistrySecret,
+			SecretName:  registrySecret,
 			Items:       []corev1.KeyToPath{{Key: corev1.DockerConfigJsonKey, Path: "config.json"}},
 			DefaultMode: &mode,
+			Optional:    &tr,
 		}}})
 		mounts = append(mounts, corev1.VolumeMount{Name: "registry-auth", MountPath: dockerDir, ReadOnly: true})
 		env = append(env, corev1.EnvVar{Name: "DOCKER_CONFIG", Value: dockerDir})
@@ -193,7 +204,6 @@ func BuildJob(cfg Config, t Target) *batchv1.Job {
 		}
 	}
 
-	f, tr := false, true
 	uid := nonRootID
 	backoff := int32(0)
 	return &batchv1.Job{

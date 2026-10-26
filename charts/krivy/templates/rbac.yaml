@@ -76,6 +76,13 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  {{- with include "krivy.registryAuthSecrets" . }}
+  # Registry auth: read only the configured Secrets, by name.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ range $i, $n := splitList "\n" . }}{{ if $i }}, {{ end }}{{ $n | quote }}{{ end }}]
+    verbs: ["get"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -166,20 +166,27 @@ There are two separate pulls:
        imagePullSecrets: [{name: mirror-creds}]
    ```
 2. **The images Trivy scans.** Trivy pulls these itself from inside the
-   scanner pod. Create a `kubernetes.io/dockerconfigjson` Secret in the job
-   namespace and reference it:
+   scanner pod. Create `kubernetes.io/dockerconfigjson` Secrets in the job
+   namespace and list them, in priority order:
    ```sh
-   kubectl -n krivy-system create secret docker-registry registry-creds \
-     --docker-server=registry.example.com --docker-username=… --docker-password=…
+   kubectl -n krivy-system create secret docker-registry ghcr-auth \
+     --docker-server=ghcr.io --docker-username=… --docker-password=…
+   kubectl -n krivy-system create secret docker-registry internal-registry-auth \
+     --docker-server=registry.example.com:5000 --docker-username=… --docker-password=…
    ```
    ```yaml
    scanner:
-     registrySecret: registry-creds      # mounted into scanner pods for Trivy
-     imagePullSecrets: [registry-creds]  # optional; pod-level pull secrets only help the kubelet pull the Trivy image
+     registryAuth:
+       existingSecrets: [ghcr-auth, internal-registry-auth]
    ```
+   For each image, Krivy mounts at most the one Secret whose entry matches the
+   image's registry, read-only, into that scanner pod. Public images get no
+   credentials. The chart grants the controller `get` on exactly these
+   Secrets. Do not add them to `imagePullSecrets`: that only helps the kubelet
+   pull the Trivy image.
 
-The controller never reads these Secrets. It only references them in the Job
-spec.
+Details on Docker Hub, multiple registries, rotation, errors and why k3s
+`registries.yaml` is not imported: [private registries](private-registries.md).
 
 ## Restricting scope
 

@@ -1,0 +1,5 @@
+scanner:
+  registryAuth:
+    existingSecrets:
+      - ghcr-auth
+      - internal-registry-auth

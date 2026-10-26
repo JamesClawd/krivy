@@ -340,6 +340,19 @@ func TestValidate(t *testing.T) {
 		{"webhook no scheme", func(c *Config) { c.Notifications.Destinations[0].URL = "example.com" }, "must be http(s)"},
 		{"no events", func(c *Config) { c.Notifications.Destinations[0].Events = nil }, "events is required"},
 		{"unknown event", func(c *Config) { c.Notifications.Destinations[0].Events = []string{"new_high"} }, `unknown event "new_high"`},
+		{"registry auth secrets", func(c *Config) {
+			c.Kubernetes.RegistryAuth.ExistingSecrets = []string{"ghcr-auth", "registry.example.com"}
+		}, ""},
+		{"invalid registry auth secret name", func(c *Config) {
+			c.Kubernetes.RegistryAuth.ExistingSecrets = []string{"Bad_Name"}
+		}, `existingSecrets[0]: "Bad_Name" is not a valid Secret name`},
+		{"empty registry auth secret name", func(c *Config) {
+			c.Kubernetes.RegistryAuth.ExistingSecrets = []string{""}
+		}, "is not a valid Secret name"},
+		{"duplicate registry auth secret", func(c *Config) {
+			c.Kubernetes.RegistryAuth.ExistingSecrets = []string{"a", "a"}
+		}, `duplicate Secret "a"`},
+		{"invalid deprecated registrySecret", func(c *Config) { c.Kubernetes.RegistrySecret = "x/y" }, "kubernetes.registrySecret"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid()
@@ -370,5 +383,41 @@ func TestValidateJoinsMultipleErrors(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in %v", want, err)
 		}
+	}
+}
+
+func TestRegistryAuth(t *testing.T) {
+	var c Config
+	yml := "kubernetes:\n  registryAuth:\n    existingSecrets: [ghcr-auth, internal-auth]\n"
+	if err := Parse([]byte(yml), &c, lookupFrom(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(c.Kubernetes.RegistryAuthSecrets(), ","); got != "ghcr-auth,internal-auth" {
+		t.Errorf("secrets = %q", got)
+	}
+	// Strict parsing: credentials cannot be put into the config.
+	for _, bad := range []string{
+		"kubernetes:\n  registryAuth:\n    username: u\n",
+		"kubernetes:\n  registryAuth:\n    existingSecrets: [{name: a}]\n",
+	} {
+		if err := Parse([]byte(bad), &Config{}, lookupFrom(nil)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	// ${ENV} is not expanded in Secret names.
+	var e Config
+	if err := Parse([]byte("kubernetes:\n  registryAuth:\n    existingSecrets: ['${X}']\n"), &e, lookupFrom(map[string]string{"X": "a"})); err != nil {
+		t.Fatal(err)
+	}
+	if e.Validate() == nil {
+		t.Error("unexpanded ${X} must fail validation")
+	}
+	// The deprecated registrySecret comes first and is not repeated.
+	k := KubernetesConfig{RegistrySecret: "old", RegistryAuth: RegistryAuthConfig{ExistingSecrets: []string{"a", "old", "b"}}}
+	if got := strings.Join(k.RegistryAuthSecrets(), ","); got != "old,a,b" {
+		t.Errorf("merged = %q", got)
+	}
+	if got := (KubernetesConfig{}).RegistryAuthSecrets(); len(got) != 0 {
+		t.Errorf("default = %v", got)
 	}
 }

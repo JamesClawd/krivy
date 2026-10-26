@@ -94,6 +94,16 @@ app.kubernetes.io/component: controller
 {{- end }}
 {{- end }}
 
+{{/* Registry auth Secret names (deprecated registrySecret first), one per line. */}}
+{{- define "krivy.registryAuthSecrets" -}}
+{{- $names := list }}
+{{- with .Values.scanner.registrySecret }}{{ $names = append $names . }}{{ end }}
+{{- range ((.Values.scanner.registryAuth).existingSecrets) }}
+{{- if not (has . $names) }}{{ $names = append $names . }}{{ end }}
+{{- end }}
+{{- join "\n" $names }}
+{{- end }}
+
 {{/* Env var name for an auth token entry. */}}
 {{- define "krivy.tokenEnv" -}}
 {{- default (printf "KRIVY_TOKEN_%s" (.name | upper | replace "-" "_" | replace "." "_")) .env }}
@@ -119,8 +129,12 @@ kubernetes:
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  {{- with .Values.scanner.registrySecret }}
-  registrySecret: {{ . | quote }}
+  {{- with include "krivy.registryAuthSecrets" . }}
+  registryAuth:
+    existingSecrets:
+      {{- range splitList "\n" . }}
+      - {{ . | quote }}
+      {{- end }}
   {{- end }}
 scan:
   schedule: {{ .Values.scan.schedule | quote }}

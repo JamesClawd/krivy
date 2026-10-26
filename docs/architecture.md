@@ -133,7 +133,8 @@ sequenceDiagram
 | `timeout` | yes | Job exceeded `trivy.timeout` (`activeDeadlineSeconds`). |
 | `scheduling` | yes | Pod unschedulable, or the Trivy image cannot be pulled, for longer than 3 minutes. The Job is deleted. |
 | `scanner` | yes | Trivy exited non-zero, was OOM-killed, or failed to download its DB (including rate limiting). |
-| `image_pull` | **no** | Trivy could not fetch the scanned image (unauthorized, denied, manifest unknown, not found). |
+| `registry_auth` | **no** | A `registryAuth` Secret is missing, unreadable or invalid (no Job is created), or the registry answered unauthorized/denied/403 for the scanned image. See [private registries](private-registries.md#errors). |
+| `image_pull` | **no** | Trivy could not find the scanned image (manifest unknown, name unknown, not found). |
 | `output` | no if too large, otherwise yes | Report larger than `trivy.maxOutputBytes`, missing, truncated or not valid JSON. |
 | `kubernetes` | yes, except forbidden / invalid / unauthorized | API errors creating or watching the Job. |
 

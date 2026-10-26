@@ -120,7 +120,7 @@ Details: [webhooks](webhooks.md#ssrf-protection).
 | Traffic | From | To | Contents |
 |---|---|---|---|
 | Trivy DB download | scanner pods | `ghcr.io` / `mirror.gcr.io` (or your `--db-repository`) | Anonymous download, once per Job |
-| Image pulls for scanning | scanner pods | Registry of each scanned image | Standard registry requests, with `registrySecret` credentials if configured |
+| Image pulls for scanning | scanner pods | Registry of each scanned image | Standard registry requests, with the matching `registryAuth` Secret's credentials if one matches |
 | Trivy image pull | kubelet | `ghcr.io/aquasecurity/trivy` (or your mirror) | Standard image pull |
 | Webhooks | controller | Configured destinations | Finding data (CVE, package, image, namespaces, workload names), scan status |
 
@@ -132,24 +132,36 @@ of another team's channel.
 
 ## Private registry credentials
 
-* Krivy does **not** reuse the `imagePullSecrets` of your workloads, and the
-  controller never reads Secrets.
-* Set `kubernetes.registrySecret` (chart: `scanner.registrySecret`) to the
-  name of a `kubernetes.io/dockerconfigjson` Secret in the job namespace. It
-  is mounted read-only at `/tmp/.docker/config.json` in every scanner pod and
-  used by Trivy for all registries listed in it.
+* Krivy does **not** reuse the `imagePullSecrets` of your workloads, and it
+  never reads Secrets in workload namespaces.
+* `kubernetes.registryAuth.existingSecrets` (chart:
+  `scanner.registryAuth.existingSecrets`) lists existing
+  `kubernetes.io/dockerconfigjson` Secrets in the job namespace. You create
+  and rotate them. Krivy never creates, copies or stores them, and they are
+  not in Helm values or the database.
+* The controller reads these Secrets (`get`, restricted by `resourceNames` in
+  the chart) on every scan, to validate them and to choose the one whose
+  entry matches the image. Only that Secret is mounted, read-only, at
+  `/tmp/.docker/config.json` in that image's scanner pod. Images that no
+  Secret covers get no credentials. Credentials never appear in Job specs,
+  arguments, environment variables, logs, scan records, notifications or
+  REST/MCP responses. Diagnostics from failed scans are scrubbed of the
+  mounted credential values in addition to the generic redaction.
 * `kubernetes.imagePullSecrets` only affects how the kubelet pulls the Trivy
   image; it does not give Trivy access to scanned images.
 
 Limitations:
 
-* One Secret for all scans: every scanner pod can read every credential in it,
-  whatever image it is scanning. Use read-only, pull-only credentials.
+* A scanner pod can read every entry of the Secret mounted for its image. Keep
+  unrelated registries in separate Secrets and use read-only, pull-only
+  credentials.
+* Anyone who can create Pods in the job namespace can mount these Secrets.
+  Keep that namespace dedicated to Krivy.
 * Cloud workload identity (IRSA, GKE Workload Identity) and credential
   helpers are not wired up, because scanner pods have no ServiceAccount token.
-* If credentials are missing or wrong, the image fails with `image_pull`,
-  which is not retried. The rest of the run continues and finishes as
-  `partial`.
+* Missing, invalid or rejected credentials fail the image with
+  `registry_auth`, which is not retried. The rest of the run continues and
+  finishes as `partial`. See [private registries](private-registries.md#errors).
 
 ## Data at rest
 

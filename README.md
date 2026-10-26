@@ -112,6 +112,7 @@ Details: [docs/architecture.md](docs/architecture.md).
 | Document | Contents |
 |---|---|
 | [Installation](docs/installation.md) | Helm install, database, tokens, private registries, NetworkPolicy, upgrades |
+| [Private registries](docs/private-registries.md) | Registry credential Secrets (GHCR, generic, Docker Hub), selection rules, rotation, errors |
 | [Configuration](docs/configuration.md) | Every config key with defaults, `${ENV}` substitution, env overrides |
 | [Architecture](docs/architecture.md) | Components, data model, scan lifecycle, recovery, resources |
 | [Security model](docs/security-model.md) | RBAC, scanner hardening, tokens, SSRF, data leaving the cluster |
@@ -132,9 +133,10 @@ Details: [docs/architecture.md](docs/architecture.md).
 * **Scanner pods need egress** to the Trivy DB mirror (`ghcr.io` /
   `mirror.gcr.io`) and to every registry they scan. Air-gapped clusters need a
   mirror and `trivy.extraArgs` such as `--db-repository`.
-* **Private registries need one dockerconfigjson Secret** in the job
-  namespace (`kubernetes.registrySecret`). Krivy does not reuse the
-  `imagePullSecrets` of your workloads.
+* **Private registries need dockerconfigjson Secrets** that you create in the
+  job namespace and list in `kubernetes.registryAuth.existingSecrets`
+  ([details](docs/private-registries.md)). Krivy does not reuse the
+  `imagePullSecrets` of your workloads or k3s `registries.yaml`.
 * **Static tokens only.** No OAuth, OIDC or per-user accounts. Changing or
   revoking a token needs a config change and a restart.
 * **Webhooks are outbound only** and configured only in the config file; there
